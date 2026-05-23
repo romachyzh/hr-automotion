@@ -36,6 +36,10 @@ export async function withErrorHandling<T>(
                 status: sageErr.status,
                 endpoint: sageErr.endpoint,
                 tool: label,
+                // SageHR's response body usually explains *why* on 4xx
+                // (e.g. {"errors":{"from":["is required"]}} for 422).
+                // Truncate huge bodies to keep tool output reasonable.
+                sagehr_response: truncateForLog(sageErr.body),
               },
               null,
               2,
@@ -61,5 +65,19 @@ export async function withErrorHandling<T>(
         },
       ],
     };
+  }
+}
+
+function truncateForLog(body: unknown, maxChars = 2000): unknown {
+  if (body == null) return null;
+  if (typeof body === "string") {
+    return body.length > maxChars ? `${body.slice(0, maxChars)}…[truncated]` : body;
+  }
+  try {
+    const serialised = JSON.stringify(body);
+    if (serialised.length <= maxChars) return body;
+    return `${serialised.slice(0, maxChars)}…[truncated]`;
+  } catch {
+    return String(body).slice(0, maxChars);
   }
 }
