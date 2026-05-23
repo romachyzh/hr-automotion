@@ -14,7 +14,7 @@ describe("buildServer", () => {
     expect(client.baseUrl).toBe("https://acme-test.sage.hr/api");
   });
 
-  it("registers all 10 read-only tools", () => {
+  it("registers all read-only tools", () => {
     const { server } = buildServer(config);
     // McpServer exposes registered tools internally; reach in via the
     // standard registry shape used by @modelcontextprotocol/sdk v1.
@@ -25,6 +25,8 @@ describe("buildServer", () => {
       [
         "sagehr_get_employee",
         "sagehr_get_leave_request",
+        "sagehr_leave_summary_across_employees",
+        "sagehr_leave_summary_for_employee",
         "sagehr_list_absences",
         "sagehr_list_employees",
         "sagehr_list_leave_policies",

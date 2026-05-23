@@ -3,6 +3,7 @@ import { SageHRClient } from "@hr-automotion/sagehr-client";
 import type { Config } from "./config.js";
 import { registerEmployeeTools } from "./tools/employees.js";
 import { registerLeaveTools } from "./tools/leave.js";
+import { registerLeaveSummaryTools } from "./tools/leave-summary.js";
 import { registerAbsenceTools } from "./tools/absences.js";
 import { registerOrgTools } from "./tools/org.js";
 
@@ -32,6 +33,7 @@ export function buildServer(config: Config): BuildServerResult {
 
   registerEmployeeTools(server, client);
   registerLeaveTools(server, client);
+  registerLeaveSummaryTools(server, client);
   registerAbsenceTools(server, client);
   registerOrgTools(server, client, config);
 

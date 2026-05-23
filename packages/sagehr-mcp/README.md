@@ -14,6 +14,8 @@ All tools are **read-only** in v1.
 | `sagehr_search_employees` | Fuzzy substring search by name / email |
 | `sagehr_list_leave_requests` | Leave requests with date-range and status filters |
 | `sagehr_get_leave_request` | Single leave request by id |
+| `sagehr_leave_summary_for_employee` | Per-policy day-off totals (sick/vacation/etc.) for one employee, plus current balances |
+| `sagehr_leave_summary_across_employees` | Aggregate day-off usage across the tenant, ranked per employee, with per-policy breakdown |
 | `sagehr_list_absences` | Out-of-office in a date range |
 | `sagehr_list_teams` | All teams |
 | `sagehr_list_positions` | All positions / job titles |
