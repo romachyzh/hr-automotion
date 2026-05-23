@@ -7,6 +7,7 @@ import {
   SageHRError,
 } from "../src/index.js";
 import { chunkDateRange } from "../src/pagination.js";
+import { computeLeaveDays } from "../src/schemas/leave-request.js";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -201,6 +202,90 @@ describe("SageHRClient", () => {
       const span = (Date.parse(c.to + "T00:00:00Z") - Date.parse(c.from + "T00:00:00Z")) / 86_400_000;
       expect(span).toBeLessThan(65);
     }
+  });
+});
+
+describe("computeLeaveDays", () => {
+  it("counts inclusive calendar days for a multi-day full leave", () => {
+    expect(
+      computeLeaveDays({
+        id: 1,
+        employee_id: 1,
+        start_date: "2026-04-17",
+        end_date: "2026-04-23",
+        is_part_of_day: false,
+      }),
+    ).toBe(7);
+  });
+  it("returns 1 for a single full day with start_date only", () => {
+    expect(
+      computeLeaveDays({ id: 1, employee_id: 1, start_date: "2026-05-06" }),
+    ).toBe(1);
+  });
+  it("returns 0.5 for a half-day (first part)", () => {
+    expect(
+      computeLeaveDays({
+        id: 1,
+        employee_id: 1,
+        start_date: "2026-05-06",
+        is_part_of_day: true,
+        first_part_of_day: true,
+        second_part_of_day: false,
+      }),
+    ).toBe(0.5);
+  });
+  it("returns 1 when both halves of a part-of-day are set", () => {
+    expect(
+      computeLeaveDays({
+        id: 1,
+        employee_id: 1,
+        start_date: "2026-05-06",
+        is_part_of_day: true,
+        first_part_of_day: true,
+        second_part_of_day: true,
+      }),
+    ).toBe(1);
+  });
+  it("returns 0.5 when is_part_of_day is true but half flags missing", () => {
+    expect(
+      computeLeaveDays({
+        id: 1,
+        employee_id: 1,
+        start_date: "2026-05-06",
+        is_part_of_day: true,
+      }),
+    ).toBe(0.5);
+  });
+  it("returns 0 when start_date is missing", () => {
+    expect(computeLeaveDays({ id: 1, employee_id: 1 })).toBe(0);
+  });
+});
+
+describe("listAll client-side employee_id filter", () => {
+  it("drops records whose employee_id doesn't match the filter (SageHR ignores its own param)", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        data: [
+          { id: 1, employee_id: 100, start_date: "2026-04-01", end_date: "2026-04-02" },
+          { id: 2, employee_id: 200, start_date: "2026-04-03", end_date: "2026-04-04" },
+          { id: 3, employee_id: 100, start_date: "2026-04-05", end_date: "2026-04-06" },
+        ],
+        meta: { total: 3, current_page: 1, total_pages: 1 },
+      }),
+    ) as unknown as typeof fetch;
+    const client = new SageHRClient({
+      subdomain: "acme",
+      apiKey: "k",
+      fetch,
+      maxRetries: 0,
+    });
+    const out: Array<unknown> = [];
+    for await (const r of client.leaveRequests.listAll({ employee_id: 100 })) {
+      out.push(r);
+    }
+    expect(out).toHaveLength(2);
+    expect((out[0] as { employee_id: number }).employee_id).toBe(100);
+    expect((out[1] as { employee_id: number }).employee_id).toBe(100);
   });
 });
 

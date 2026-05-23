@@ -10,6 +10,7 @@ export {
 
 export type { Employee } from "./schemas/employee.js";
 export type { LeaveRequest } from "./schemas/leave-request.js";
+export { computeLeaveDays } from "./schemas/leave-request.js";
 export type { Absence } from "./schemas/absence.js";
 export type { Team, Position } from "./schemas/team.js";
 export type { LeavePolicy, LeaveBalance } from "./schemas/policy.js";

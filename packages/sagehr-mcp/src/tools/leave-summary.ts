@@ -19,6 +19,7 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { computeLeaveDays } from "@hr-automotion/sagehr-client";
 import type { SageHRClient, LeaveRequest } from "@hr-automotion/sagehr-client";
 import { withErrorHandling } from "./_helpers.js";
 
@@ -26,18 +27,28 @@ const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected ISO date YYYY-MM-DD");
 
-/** Bucket key normalising whatever status strings the tenant uses. */
-function normaliseStatus(raw: string | null | undefined): "approved" | "pending" | "rejected" | "cancelled" | "other" {
-  const s = (raw ?? "").toLowerCase();
-  if (s.includes("approve")) return "approved";
-  if (s.includes("pend") || s.includes("await")) return "pending";
-  if (s.includes("reject") || s.includes("declin")) return "rejected";
-  if (s.includes("cancel")) return "cancelled";
+/**
+ * Pick a canonical status bucket. SageHR ships both `status_code`
+ * (machine-readable: "approved" / "declined" / "pending" / "cancelled")
+ * and `status` (human-readable, capitalisation varies). Prefer the code
+ * field, fall back to fuzzy-matching the human string.
+ */
+function normaliseStatus(req: LeaveRequest): "approved" | "pending" | "rejected" | "cancelled" | "other" {
+  const code = (req.status_code ?? "").toLowerCase();
+  if (code === "approved") return "approved";
+  if (code === "pending" || code === "awaiting" || code === "awaiting_approval") return "pending";
+  if (code === "rejected" || code === "declined") return "rejected";
+  if (code === "cancelled" || code === "canceled") return "cancelled";
+
+  const human = (req.status ?? "").toLowerCase();
+  if (human.includes("approve")) return "approved";
+  if (human.includes("pend") || human.includes("await")) return "pending";
+  if (human.includes("reject") || human.includes("declin")) return "rejected";
+  if (human.includes("cancel")) return "cancelled";
   return "other";
 }
 
 interface PolicyBucket {
-  policy: string | null;
   policy_id: string | number | null;
   request_count: number;
   days_total: number;
@@ -65,11 +76,10 @@ function aggregateByPolicy(requests: LeaveRequest[]): {
   let totalHours = 0;
 
   for (const req of requests) {
-    const key = `${req.policy_id ?? ""}::${req.policy ?? ""}`;
+    const key = String(req.policy_id ?? "unknown");
     let bucket = buckets.get(key);
     if (!bucket) {
       bucket = {
-        policy: req.policy ?? null,
         policy_id: req.policy_id ?? null,
         request_count: 0,
         days_total: 0,
@@ -78,19 +88,21 @@ function aggregateByPolicy(requests: LeaveRequest[]): {
       };
       buckets.set(key, bucket);
     }
-    const days = Number(req.days_count ?? 0) || 0;
-    const hours = Number(req.hours_count ?? 0) || 0;
+    // Days aren't pre-computed on SageHR's response — derive from dates and
+    // part-of-day flags. Hours are returned directly when present.
+    const days = computeLeaveDays(req);
+    const hours = Number(req.hours ?? 0) || 0;
     bucket.request_count += 1;
-    bucket.days_total += days;
-    bucket.hours_total += hours;
+    bucket.days_total = round2(bucket.days_total + days);
+    bucket.hours_total = round2(bucket.hours_total + hours);
     totalDays += days;
     totalHours += hours;
 
-    const statusKey = normaliseStatus(req.status);
+    const statusKey = normaliseStatus(req);
     const statusBucket = bucket.by_status[statusKey];
     statusBucket.request_count += 1;
-    statusBucket.days += days;
-    statusBucket.hours += hours;
+    statusBucket.days = round2(statusBucket.days + days);
+    statusBucket.hours = round2(statusBucket.hours + hours);
   }
 
   const by_policy = [...buckets.values()].sort((a, b) => b.days_total - a.days_total);
@@ -106,6 +118,39 @@ function aggregateByPolicy(requests: LeaveRequest[]): {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * SageHR's leave-request payload carries `policy_id` but not the policy name.
+ * Fetch the policy list once and build a lookup so we can attach `policy`
+ * (display name) to every aggregated bucket.
+ */
+async function fetchPolicyNameMap(client: SageHRClient): Promise<Map<string, string>> {
+  try {
+    const policies = await client.policies.list();
+    return new Map(policies.map((p) => [String(p.id), p.name]));
+  } catch {
+    return new Map();
+  }
+}
+
+function withPolicyName(
+  bucket: PolicyBucket,
+  policyNameById: Map<string, string>,
+): PolicyBucket & { policy: string | null } {
+  const id = bucket.policy_id == null ? null : String(bucket.policy_id);
+  return {
+    ...bucket,
+    policy: id ? (policyNameById.get(id) ?? null) : null,
+  };
+}
+
+async function attachPolicyNames(
+  client: SageHRClient,
+  buckets: PolicyBucket[],
+): Promise<Array<PolicyBucket & { policy: string | null }>> {
+  const map = await fetchPolicyNameMap(client);
+  return buckets.map((b) => withPolicyName(b, map));
 }
 
 function defaultYearStart(today: Date = new Date()): string {
@@ -161,6 +206,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
           requests.push(r);
         }
         const { by_policy, totals } = aggregateByPolicy(requests);
+        const enriched = await attachPolicyNames(client, by_policy);
         const balances =
           include_balances !== false
             ? await client.policies.balancesFor(employee_id).catch(() => null)
@@ -170,7 +216,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
           from: fromDate,
           to: toDate,
           totals,
-          by_policy,
+          by_policy: enriched,
           balances,
         };
       }),
@@ -256,13 +302,21 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
         const capped = perEmployee.slice(0, cap);
         const grand = aggregateByPolicy(requests);
 
+        // Look up policy names once and attach to every bucket.
+        const policyNameById = await fetchPolicyNameMap(client);
+        const grandEnriched = grand.by_policy.map((b) => withPolicyName(b, policyNameById));
+        const cappedEnriched = capped.map((row) => ({
+          ...row,
+          by_policy: row.by_policy.map((b) => withPolicyName(b, policyNameById)),
+        }));
+
         return {
           from: fromDate,
           to: toDate,
           filter: { policy_id: policy_id ?? null, status: status ?? null },
           totals: grand.totals,
-          by_policy: grand.by_policy,
-          employees: capped,
+          by_policy: grandEnriched,
+          employees: cappedEnriched,
           employees_total: perEmployee.length,
           employees_truncated: perEmployee.length > capped.length,
         };
