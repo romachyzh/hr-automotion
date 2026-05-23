@@ -61,4 +61,24 @@ describe("loadConfig", () => {
     expect(c.httpPort).toBe(9999);
     expect(c.bearerToken).toBe("tok");
   });
+
+  it("prefers PORT (PaaS convention) over HTTP_PORT", () => {
+    const c = loadConfig({
+      SAGEHR_SUBDOMAIN: "a",
+      SAGEHR_API_KEY: "k",
+      PORT: "4321",
+      HTTP_PORT: "9999",
+    } as NodeJS.ProcessEnv);
+    expect(c.httpPort).toBe(4321);
+  });
+
+  it("rejects unparseable PORT", () => {
+    expect(() =>
+      loadConfig({
+        SAGEHR_SUBDOMAIN: "a",
+        SAGEHR_API_KEY: "k",
+        PORT: "not-a-number",
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/PORT/);
+  });
 });

@@ -15,7 +15,8 @@
     "dev:http": "tsx --env-file=.env src/index.ts --http",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.js --http"
   },
   "dependencies": {
     "@hr-automotion/sagehr-client": "workspace:*",

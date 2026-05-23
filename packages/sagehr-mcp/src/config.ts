@@ -14,9 +14,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!apiKey) throw new Error("Missing required env SAGEHR_API_KEY");
 
   const logLevel = env.LOG_LEVEL === "debug" ? "debug" : "info";
-  const httpPort = Number(env.HTTP_PORT ?? "8787");
+  // Railway, Fly, Render and most PaaS providers inject PORT. Prefer it so the
+  // server binds to whatever the platform expects without extra config.
+  const rawPort = env.PORT ?? env.HTTP_PORT ?? "8787";
+  const httpPort = Number(rawPort);
   if (!Number.isFinite(httpPort) || httpPort <= 0) {
-    throw new Error(`Invalid HTTP_PORT: ${env.HTTP_PORT}`);
+    throw new Error(`Invalid PORT/HTTP_PORT: ${rawPort}`);
   }
 
   return {

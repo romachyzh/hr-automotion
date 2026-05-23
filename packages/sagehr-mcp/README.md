@@ -46,8 +46,10 @@ pnpm build && node dist/index.js
 # .env must also include MCP_BEARER_TOKEN
 pnpm dev:http
 # or built:
-pnpm build && node dist/index.js --http
+pnpm build && pnpm start:http
 ```
+
+For hosting on Railway (or any PaaS that injects `PORT`), follow [`docs/railway.md`](./docs/railway.md) — the repo ships a `railway.json` so `railway up` from the repo root is enough.
 
 ## Use from Claude Code
 
@@ -123,5 +125,6 @@ curl -sS -X POST http://localhost:8787/mcp \
 | `SAGEHR_API_KEY` | yes | — | From SageHR Settings → Integrations → API |
 | `MCP_BEARER_TOKEN` | only with `--http` | — | Random long string; clients send as `Authorization: Bearer …` |
 | `SAGEHR_USER_AGENT` | no | `hr-automotion/sagehr-mcp/0.1` | Sent on every SageHR request |
-| `HTTP_PORT` | no | `8787` | HTTP transport port |
+| `PORT` | no | — | Auto-set by Railway/Fly/Render. Takes precedence over `HTTP_PORT`. |
+| `HTTP_PORT` | no | `8787` | HTTP transport port when `PORT` isn't set |
 | `LOG_LEVEL` | no | `info` | `info` or `debug` |
