@@ -1,0 +1,31 @@
+{
+  "name": "hr-automotion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo of HR automations. First package: SageHR MCP server.",
+  "packageManager": "pnpm@10.31.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "dev": "pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm --filter @hr-automotion/sagehr-client build && pnpm -r typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "clean": "pnpm -r exec rm -rf dist .turbo node_modules/.cache"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^9.18.0",
+    "@eslint/js": "^9.18.0",
+    "typescript-eslint": "^8.20.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "msw"]
+  }
+}

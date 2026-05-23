@@ -1,0 +1,16 @@
+node_modules
+dist
+.turbo
+coverage
+*.log
+.DS_Store
+
+# env files contain SAGEHR_API_KEY etc — never commit
+.env
+.env.*
+!.env.example
+
+# editor cruft
+.vscode/*
+!.vscode/settings.json.example
+.idea
