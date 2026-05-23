@@ -48,3 +48,49 @@ export async function* paginate<T>(
     page++;
   }
 }
+
+/**
+ * Split an inclusive ISO date range into windows of at most `maxDays` each.
+ *
+ * SageHR's `/leave-management/requests` and `/leave-management/out-of-office`
+ * endpoints reject any range longer than 65 days with HTTP 422
+ * `{"error_code":"bad_parameters","errors":["Days between date range must be less than 65"]}`.
+ * Using `maxDays = 60` gives a small safety margin.
+ *
+ * If either bound is missing, returns a single window with whatever was given.
+ * If `to` is on or before `from`, returns a single window verbatim.
+ */
+export function chunkDateRange(
+  from: string | undefined,
+  to: string | undefined,
+  maxDays = 60,
+): Array<{ from?: string; to?: string }> {
+  if (!from || !to) return [{ from, to }];
+
+  const startMs = Date.parse(`${from}T00:00:00Z`);
+  const endMs = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return [{ from, to }];
+  }
+
+  const dayMs = 86_400_000;
+  const totalDays = Math.round((endMs - startMs) / dayMs);
+  if (totalDays < maxDays) return [{ from, to }];
+
+  const windows: Array<{ from?: string; to?: string }> = [];
+  let cursor = startMs;
+  while (cursor <= endMs) {
+    const windowEnd = Math.min(cursor + (maxDays - 1) * dayMs, endMs);
+    windows.push({ from: toIsoDate(cursor), to: toIsoDate(windowEnd) });
+    cursor = windowEnd + dayMs;
+  }
+  return windows;
+}
+
+function toIsoDate(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}

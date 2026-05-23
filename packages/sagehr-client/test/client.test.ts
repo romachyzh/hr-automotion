@@ -6,6 +6,7 @@ import {
   SageHRRateLimitError,
   SageHRError,
 } from "../src/index.js";
+import { chunkDateRange } from "../src/pagination.js";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -163,5 +164,68 @@ describe("SageHRClient", () => {
   it("rejects empty subdomain / apiKey", () => {
     expect(() => new SageHRClient({ subdomain: "", apiKey: "k" })).toThrow();
     expect(() => new SageHRClient({ subdomain: "acme", apiKey: "" })).toThrow();
+  });
+
+  it("chunks leave-request listAll into <=60-day windows to avoid SageHR 422", async () => {
+    const calls: Array<{ from?: string; to?: string }> = [];
+    const fetch = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      calls.push({
+        from: u.searchParams.get("from") ?? undefined,
+        to: u.searchParams.get("to") ?? undefined,
+      });
+      return jsonResponse({
+        data: [],
+        meta: { total: 0, current_page: 1, total_pages: 0 },
+      });
+    }) as unknown as typeof fetch;
+    const client = new SageHRClient({
+      subdomain: "acme",
+      apiKey: "k",
+      fetch,
+      maxRetries: 0,
+    });
+
+    const out: unknown[] = [];
+    for await (const r of client.leaveRequests.listAll({
+      from: "2026-01-01",
+      to: "2026-05-23", // ~143 days
+    })) {
+      out.push(r);
+    }
+    // Expect at least 3 windows (143 / 60 ≈ 3), each ≤ 60 days span.
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    for (const c of calls) {
+      expect(c.from).toBeDefined();
+      expect(c.to).toBeDefined();
+      const span = (Date.parse(c.to + "T00:00:00Z") - Date.parse(c.from + "T00:00:00Z")) / 86_400_000;
+      expect(span).toBeLessThan(65);
+    }
+  });
+});
+
+describe("chunkDateRange", () => {
+  it("returns single window when range is short", () => {
+    expect(chunkDateRange("2026-01-01", "2026-02-01", 60)).toEqual([
+      { from: "2026-01-01", to: "2026-02-01" },
+    ]);
+  });
+  it("returns the input verbatim when either bound is missing", () => {
+    expect(chunkDateRange(undefined, undefined, 60)).toEqual([{ from: undefined, to: undefined }]);
+    expect(chunkDateRange("2026-01-01", undefined, 60)).toEqual([
+      { from: "2026-01-01", to: undefined },
+    ]);
+  });
+  it("splits >60-day ranges into adjacent windows that fully cover the range", () => {
+    const windows = chunkDateRange("2026-01-01", "2026-05-23", 60);
+    expect(windows.length).toBeGreaterThan(1);
+    expect(windows[0]!.from).toBe("2026-01-01");
+    expect(windows[windows.length - 1]!.to).toBe("2026-05-23");
+    // adjacent windows are contiguous (next.from = prev.to + 1 day)
+    for (let i = 1; i < windows.length; i++) {
+      const prevTo = Date.parse(windows[i - 1]!.to! + "T00:00:00Z");
+      const nextFrom = Date.parse(windows[i]!.from! + "T00:00:00Z");
+      expect(nextFrom - prevTo).toBe(86_400_000);
+    }
   });
 });

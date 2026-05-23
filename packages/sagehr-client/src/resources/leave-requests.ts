@@ -2,6 +2,7 @@ import type { SageHRClient } from "../client.js";
 import { LeaveRequestSchema, type LeaveRequest } from "../schemas/leave-request.js";
 import {
   PagedResponseSchema,
+  chunkDateRange,
   paginate,
   type PageParams,
   type PagedResponse,
@@ -44,9 +45,18 @@ export class LeaveRequestsResource {
     return LeaveRequestSchema.parse(wrapped);
   }
 
-  listAll(params: Omit<ListLeaveRequestsParams, "page"> = {}): AsyncIterable<LeaveRequest> {
-    return paginate((p) => this.list({ ...params, ...p }), {
-      page_size: params.page_size,
-    });
+  /**
+   * Walk every leave request matching the filters. Transparently chunks the
+   * date range into ≤60-day windows because SageHR rejects longer ranges
+   * with HTTP 422 ("Days between date range must be less than 65").
+   */
+  async *listAll(params: Omit<ListLeaveRequestsParams, "page"> = {}): AsyncIterable<LeaveRequest> {
+    const { from, to, ...rest } = params;
+    const windows = chunkDateRange(from, to, 60);
+    for (const window of windows) {
+      yield* paginate((p) => this.list({ ...rest, ...window, ...p }), {
+        page_size: params.page_size,
+      });
+    }
   }
 }
