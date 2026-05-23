@@ -1,3 +1,22 @@
+/**
+ * Aggregation tools for day-off counts.
+ *
+ * Both tools fan out to `GET /leave-management/requests` repeatedly via the
+ * client's `listAll`, which auto-chunks the date range into ≤60-day windows
+ * to bypass SageHR's 65-day cap. The model can request a full year (or
+ * longer) without worrying about the underlying API limit.
+ *
+ * Aggregation produces:
+ *   • totals  — grand totals across all matching requests
+ *   • by_policy — bucketed by leave policy, sorted by days_total desc
+ *   • by_status (nested in each policy) — approved / pending / rejected /
+ *     cancelled / other, fuzzy-matched from whatever status string the
+ *     tenant uses
+ *
+ * `sagehr_leave_summary_for_employee` additionally fetches
+ *   GET /employees/{id}/leave-balances
+ * when `include_balances` is true (default).
+ */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SageHRClient, LeaveRequest } from "@hr-automotion/sagehr-client";
@@ -101,6 +120,17 @@ function todayISO(today: Date = new Date()): string {
 }
 
 export function registerLeaveSummaryTools(server: McpServer, client: SageHRClient): void {
+  // SageHR: GET /leave-management/requests (chunked) +
+  //         GET /employees/{id}/leave-balances (optional)
+  //   No raw query-param exposure — model passes high-level filters and the
+  //   tool handles pagination + date chunking + aggregation.
+  //
+  //   Example tool calls:
+  //   { "name": "sagehr_leave_summary_for_employee",
+  //     "arguments": { "employee_id": 1 } }                    // YTD, with balances
+  //   { "name": "sagehr_leave_summary_for_employee",
+  //     "arguments": { "employee_id": 1, "from": "2025-01-01",
+  //                    "to": "2025-12-31", "include_balances": false } }
   server.registerTool(
     "sagehr_leave_summary_for_employee",
     {
@@ -146,6 +176,16 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
       }),
   );
 
+  // SageHR: GET /leave-management/requests (chunked, tenant-wide)
+  //   Walks every request in the date range, then groups by employee_id.
+  //   `policy_id` filter is applied client-side (saves a round-trip when
+  //   SageHR's own filter doesn't support multi-policy queries).
+  //
+  //   Example tool calls:
+  //   { "name": "sagehr_leave_summary_across_employees", "arguments": {} } // YTD all
+  //   { "name": "sagehr_leave_summary_across_employees",
+  //     "arguments": { "from": "2026-01-01", "to": "2026-05-23",
+  //                    "policy_id": 72221, "status": "approved", "top_n": 10 } }
   server.registerTool(
     "sagehr_leave_summary_across_employees",
     {

@@ -1,9 +1,32 @@
+/**
+ * Employee-directory tools.
+ *
+ * Wraps these SageHR REST endpoints:
+ *   GET /employees                — list
+ *   GET /employees/{id}           — single
+ *
+ * Common response envelope: `{ data: [...], meta: { total?, current_page?, total_pages? } }`.
+ * Single-resource calls return `{ data: {...} }` and we unwrap.
+ *
+ * Discovered limits and quirks:
+ *   • Some tenants omit `meta.total` — counts may be `null` in tool output.
+ *   • No known date-range / size caps on /employees itself.
+ *   • Status filter ("active" / "inactive") is tenant-dependent; safer to omit
+ *     if you want everyone.
+ */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SageHRClient, Employee } from "@hr-automotion/sagehr-client";
 import { withErrorHandling } from "./_helpers.js";
 
 export function registerEmployeeTools(server: McpServer, client: SageHRClient): void {
+  // SageHR: GET /employees
+  //   Query params we send: page, page_size, team_id, status
+  //   Returns: { data: Employee[], meta: { total?, current_page?, total_pages? } }
+  //
+  //   Example tool call:
+  //   { "name": "sagehr_list_employees",
+  //     "arguments": { "team_id": 42, "status": "active", "page": 1, "page_size": 50 } }
   server.registerTool(
     "sagehr_list_employees",
     {
@@ -26,6 +49,12 @@ export function registerEmployeeTools(server: McpServer, client: SageHRClient): 
       }),
   );
 
+  // SageHR: GET /employees/{id}
+  //   No query params.
+  //   Returns: { data: Employee }  (we unwrap)
+  //
+  //   Example tool call:
+  //   { "name": "sagehr_get_employee", "arguments": { "employee_id": 1 } }
   server.registerTool(
     "sagehr_get_employee",
     {
@@ -43,6 +72,14 @@ export function registerEmployeeTools(server: McpServer, client: SageHRClient): 
       }),
   );
 
+  // SageHR: GET /employees (iterated)
+  //   No native search endpoint — we walk the full directory and match
+  //   client-side against first_name + last_name + full_name + email.
+  //   Cost grows linearly with headcount; prefer sagehr_list_employees
+  //   with a team_id filter when possible.
+  //
+  //   Example tool call:
+  //   { "name": "sagehr_search_employees", "arguments": { "query": "marin", "limit": 5 } }
   server.registerTool(
     "sagehr_search_employees",
     {
