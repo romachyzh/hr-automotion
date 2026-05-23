@@ -72,7 +72,9 @@ After restarting Claude Code, run `/mcp` and you should see the 10 tools listed 
 
 ## Use from Claude Desktop
 
-`~/Library/Application Support/Claude/claude_desktop_config.json`:
+See the full step-by-step walkthrough — including OS-specific config paths, prerequisites, verification prompts, and troubleshooting — in [`docs/claude-desktop.md`](./docs/claude-desktop.md).
+
+TL;DR (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
@@ -88,6 +90,8 @@ After restarting Claude Code, run `/mcp` and you should see the 10 tools listed 
   }
 }
 ```
+
+Fully quit and relaunch Claude Desktop after editing the config.
 
 ## Verify HTTP transport with curl
 
