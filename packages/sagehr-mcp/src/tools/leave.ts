@@ -62,7 +62,24 @@ export function registerLeaveTools(server: McpServer, client: SageHRClient): voi
     },
     async (args) =>
       withErrorHandling("sagehr_list_leave_requests", async () => {
-        return await client.leaveRequests.list(args);
+        const result = await client.leaveRequests.list(args);
+        let data = result.data;
+        const applied: Record<string, unknown> = {};
+        // SageHR ignores employee_id on this endpoint — post-filter.
+        if (args.employee_id !== undefined) {
+          const want = String(args.employee_id);
+          const before = data.length;
+          data = data.filter((r) => String(r.employee_id) === want);
+          applied.employee_id_filter = { value: args.employee_id, dropped: before - data.length };
+        }
+        // SageHR ignores page_size — truncate.
+        if (args.page_size && data.length > args.page_size) {
+          applied.page_size_truncated = { original_count: data.length, page_size: args.page_size };
+          data = data.slice(0, args.page_size);
+        }
+        return Object.keys(applied).length > 0
+          ? { ...result, data, client_filters_applied: applied }
+          : { ...result, data };
       }),
   );
 
@@ -112,7 +129,18 @@ export function registerLeaveTools(server: McpServer, client: SageHRClient): voi
       withErrorHandling("sagehr_list_leave_policies", async () => {
         const policies = await client.policies.list();
         if (employee_id === undefined) return { policies };
-        const balances = await client.policies.balancesFor(employee_id);
+        // The /employees/{id}/leave-balances path 404s on some tenants
+        // (including aleph1 in our verification). Catch and degrade
+        // gracefully so the policies list still comes through.
+        const balances = await client.policies
+          .balancesFor(employee_id)
+          .catch((err) => ({
+            unavailable: true,
+            note:
+              "Could not fetch leave balances for this employee. This tenant may not expose /employees/{id}/leave-balances. " +
+              "Policies are still returned — derive remaining allowance from the policy default_allowance minus aggregated approved leave from sagehr_leave_summary_for_employee.",
+            error_message: err instanceof Error ? err.message : String(err),
+          }));
         return { policies, balances };
       }),
   );

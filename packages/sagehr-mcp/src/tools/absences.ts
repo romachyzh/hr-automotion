@@ -1,20 +1,17 @@
 /**
- * Out-of-office (absences) tools.
+ * Out-of-office (absences) tool.
  *
- * Wraps:
- *   GET /leave-management/out-of-office
+ * Derived, not native: SageHR's /leave-management/out-of-office endpoint
+ * returns 404 on the aleph1 tenant (and possibly others). We synthesise
+ * the same answer from leave-requests instead:
  *
- * Query params we send: from, to, team_id
- * Returns: { data: Absence[] }  (no pagination meta on this endpoint)
+ *   1. Walk /leave-management/requests in the date range (chunked).
+ *   2. Keep status_code === "approved" (fuzzy match on `status` as fallback).
+ *   3. If team_id is set, intersect with that team's employee_ids
+ *      from /teams.
  *
- * Discovered limits and quirks:
- *   • Same 65-day range cap as /leave-management/requests likely applies.
- *     The client auto-chunks into ≤60-day windows and concatenates results.
- *   • Records may carry either {date} (single day) OR {start_date, end_date}
- *     plus is_part_of_day / hours for half-days. The schema is permissive
- *     so all shapes pass through.
- *   • A team_id filter limits to that team's members; without it, the
- *     response covers the whole tenant.
+ * Each output record looks like a leave-request mapped to absence shape:
+ *   { id, employee_id, start_date, end_date, policy_id, status, is_part_of_day, hours }
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -26,9 +23,10 @@ const isoDate = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected ISO date YYYY-MM-DD");
 
 export function registerAbsenceTools(server: McpServer, client: SageHRClient): void {
-  // SageHR: GET /leave-management/out-of-office?from=…&to=…[&team_id=…]
-  //   `from` and `to` are REQUIRED. Long ranges are auto-chunked into
-  //   ≤60-day windows by the client; the model can request any range.
+  // Derived from GET /leave-management/requests (chunked, status=approved)
+  // + optional join with /teams to filter by team_id.
+  //   `from` and `to` are REQUIRED. Any range length is fine — the client
+  //   auto-chunks under the hood.
   //
   //   Example tool calls:
   //   { "name": "sagehr_list_absences",
@@ -41,8 +39,7 @@ export function registerAbsenceTools(server: McpServer, client: SageHRClient): v
     {
       title: "List absences (out-of-office)",
       description:
-        "Who is out of office in the given date range. Use for staffing / calendar overlap checks. " +
-        "Long ranges are auto-chunked into <=60-day windows in the client.",
+        "Who is out of office in the given date range. Derived from approved leave requests — works on all tenants regardless of whether the native /out-of-office endpoint exists.",
       inputSchema: {
         from: isoDate.describe("Inclusive start of the range (YYYY-MM-DD)."),
         to: isoDate.describe("Inclusive end of the range (YYYY-MM-DD)."),

@@ -45,7 +45,17 @@ export function registerEmployeeTools(server: McpServer, client: SageHRClient): 
     },
     async (args) =>
       withErrorHandling("sagehr_list_employees", async () => {
-        return await client.employees.list(args);
+        const result = await client.employees.list(args);
+        // SageHR silently ignores `page_size` on /employees and returns the
+        // whole page. Truncate client-side so the model gets what it asked for.
+        if (args.page_size && result.data.length > args.page_size) {
+          return {
+            ...result,
+            data: result.data.slice(0, args.page_size),
+            client_truncated: { original_count: result.data.length, page_size: args.page_size },
+          };
+        }
+        return result;
       }),
   );
 
