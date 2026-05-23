@@ -128,7 +128,11 @@ function round2(n: number): number {
 async function fetchPolicyNameMap(client: SageHRClient): Promise<Map<string, string>> {
   try {
     const policies = await client.policies.list();
-    return new Map(policies.map((p) => [String(p.id), p.name]));
+    const entries: Array<[string, string]> = [];
+    for (const p of policies) {
+      if (typeof p.name === "string") entries.push([String(p.id), p.name]);
+    }
+    return new Map(entries);
   } catch {
     return new Map();
   }
