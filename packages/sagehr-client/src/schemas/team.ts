@@ -17,18 +17,19 @@ export const TeamSchema = z
 export type Team = z.infer<typeof TeamSchema>;
 
 /**
- * Verified empirically (May 2026): `/positions` rejected my earlier
- * `name: string` schema across 37 records — SageHR's positions payload
- * uses a different field name (likely `title`). Until the real field
- * is confirmed, every property is optional + passthrough so the raw
- * payload is preserved and visible to the model.
+ * Verified empirically against a live SageHR tenant (May 2026).
+ *
+ * /positions returns { id, title, description, code }. The label field
+ * is `title` — NOT `name` like /teams uses. Models reading positions
+ * should expect `title` to carry the human-readable position label.
+ * `description` and `code` are often empty strings.
  */
 export const PositionSchema = z
   .object({
-    id: z.union([z.number(), z.string()]).optional(),
-    name: z.string().nullable().optional(),
+    id: z.union([z.number(), z.string()]),
     title: z.string().nullable().optional(),
-    employees_count: z.number().int().nonnegative().nullable().optional(),
+    description: z.string().nullable().optional(),
+    code: z.string().nullable().optional(),
   })
   .passthrough();
 

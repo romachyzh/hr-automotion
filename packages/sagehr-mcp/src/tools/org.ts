@@ -41,7 +41,9 @@ export function registerOrgTools(
 
   // SageHR: GET /positions
   //   No query params.
-  //   Returns: { data: Position[] }
+  //   Returns: { data: Position[] } where each Position is
+  //     { id, title, description, code }.
+  //   ⚠ Label field is `title` — NOT `name` like /teams uses.
   //
   //   Example tool call:
   //   { "name": "sagehr_list_positions", "arguments": {} }
@@ -49,7 +51,8 @@ export function registerOrgTools(
     "sagehr_list_positions",
     {
       title: "List positions",
-      description: "All positions / job titles in the SageHR tenant.",
+      description:
+        "All positions / job titles in the SageHR tenant. Each record carries `title` (label), `description`, and `code`.",
       inputSchema: {},
     },
     async () =>
