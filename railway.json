@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @hr-automotion/sagehr-mcp build"
+    "buildCommand": "corepack enable && pnpm install --frozen-lockfile && pnpm -r build"
   },
   "deploy": {
     "startCommand": "node packages/sagehr-mcp/dist/index.js --http",
