@@ -84,7 +84,9 @@ export async function runHttp(opts: HttpOptions): Promise<void> {
 
   await new Promise<void>((resolve) => {
     app.listen(port, () => {
-      console.error(`sagehr-mcp HTTP listening on :${port} (POST /mcp)`);
+      // stdout, not stderr — HTTP transport has no JSON-RPC-on-stdout constraint,
+      // and platforms like Railway classify stderr lines as error-severity.
+      console.log(`sagehr-mcp HTTP listening on :${port} (POST /mcp)`);
       resolve();
     });
   });
