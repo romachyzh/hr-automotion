@@ -10,7 +10,7 @@
  *   • /employees                      — directory (+ team_id / team name)
  *   • /leave-management/policies      — policy id → name, unit, allowance
  *   • /leave-management/requests      — ONE tenant-wide chunked pass for "used"
- *   • /employees/{id}/leave-balances  — "remaining", one call per employee
+ *   • /employees/{id}/leave-management/balances — "remaining", one call per employee
  *
  * Remaining is balances-with-fallback: we probe the balances endpoint on the
  * first employee; if it 404s/throws the endpoint is treated as unavailable

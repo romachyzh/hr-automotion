@@ -26,8 +26,11 @@ export const LeavePolicySchema = z
 export type LeavePolicy = z.infer<typeof LeavePolicySchema>;
 
 /**
- * Balances envelope hasn't been verified live yet — the shape below is the
- * best-guess from SageHR convention. Permissive so unknown fields pass through.
+ * `GET /employees/{id}/leave-management/balances` returns
+ *   { data: [{ policy_id, used, available }] }
+ * where `available` may be null (e.g. unlimited policies). The extra fields
+ * below (balance, policy, unit, employee_id) are not on this endpoint but are
+ * kept optional for forward-compat; `.passthrough()` tolerates unknowns.
  */
 export const LeaveBalanceSchema = z
   .object({

@@ -8,8 +8,11 @@ import {
 } from "../schemas/policy.js";
 
 const PATH_POLICIES = "/leave-management/policies";
+// SageHR's "Employee time off balances": GET /employees/{id}/leave-management/balances
+// → { data: [{ policy_id, used, available }] }. (The shorter /employees/{id}/leave-balances
+// path 404s — it does not exist in the API.)
 const PATH_BALANCES = (employeeId: number | string) =>
-  `/employees/${encodeURIComponent(String(employeeId))}/leave-balances`;
+  `/employees/${encodeURIComponent(String(employeeId))}/leave-management/balances`;
 
 const PolicyListSchema = z
   .object({

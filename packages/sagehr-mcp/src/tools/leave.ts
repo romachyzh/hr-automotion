@@ -4,8 +4,8 @@
  * Wraps these SageHR REST endpoints:
  *   GET /leave-management/requests           — list (paged)
  *   GET /leave-management/requests/{id}      — single
- *   GET /leave-management/policies           — list policies
- *   GET /employees/{id}/leave-balances       — per-employee balances
+ *   GET /leave-management/policies                    — list policies
+ *   GET /employees/{id}/leave-management/balances     — per-employee balances
  *
  * Discovered limits and quirks:
  *   • `/leave-management/requests` rejects any `from`..`to` range of
@@ -105,7 +105,7 @@ export function registerLeaveTools(server: McpServer, client: SageHRClient): voi
   );
 
   // SageHR: GET /leave-management/policies
-  //          GET /employees/{id}/leave-balances  (when employee_id given)
+  //          GET /employees/{id}/leave-management/balances  (when employee_id given)
   //   No query params on either.
   //   Returns: { policies: [...], balances?: [...] } (combined client-side)
   //
@@ -129,15 +129,14 @@ export function registerLeaveTools(server: McpServer, client: SageHRClient): voi
       withErrorHandling("sagehr_list_leave_policies", async () => {
         const policies = await client.policies.list();
         if (employee_id === undefined) return { policies };
-        // The /employees/{id}/leave-balances path 404s on some tenants
-        // (including aleph1 in our verification). Catch and degrade
-        // gracefully so the policies list still comes through.
+        // Degrade gracefully if balances can't be fetched, so the policies
+        // list still comes through.
         const balances = await client.policies
           .balancesFor(employee_id)
           .catch((err) => ({
             unavailable: true,
             note:
-              "Could not fetch leave balances for this employee. This tenant may not expose /employees/{id}/leave-balances. " +
+              "Could not fetch leave balances for this employee. " +
               "Policies are still returned — derive remaining allowance from the policy default_allowance minus aggregated approved leave from sagehr_leave_summary_for_employee.",
             error_message: err instanceof Error ? err.message : String(err),
           }));

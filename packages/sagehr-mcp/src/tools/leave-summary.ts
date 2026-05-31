@@ -14,7 +14,7 @@
  *     tenant uses
  *
  * `sagehr_leave_summary_for_employee` additionally fetches
- *   GET /employees/{id}/leave-balances
+ *   GET /employees/{id}/leave-management/balances
  * when `include_balances` is true (default).
  */
 import { z } from "zod";
@@ -57,7 +57,7 @@ const holidaysInput = z
 
 export function registerLeaveSummaryTools(server: McpServer, client: SageHRClient): void {
   // SageHR: GET /leave-management/requests (chunked) +
-  //         GET /employees/{id}/leave-balances (optional)
+  //         GET /employees/{id}/leave-management/balances (optional)
   //   No raw query-param exposure — model passes high-level filters and the
   //   tool handles pagination + date chunking + aggregation.
   //

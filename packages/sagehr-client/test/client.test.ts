@@ -204,6 +204,26 @@ describe("SageHRClient", () => {
     }
   });
 
+  it("requests balances from the leave-management/balances path", async () => {
+    let requestedPath = "";
+    const fetch = vi.fn(async (url: string) => {
+      requestedPath = new URL(url).pathname;
+      return jsonResponse({
+        data: [
+          { policy_id: 1, used: 5.6, available: 2 },
+          { policy_id: 2, used: 75, available: null },
+        ],
+      });
+    }) as unknown as typeof fetch;
+    const client = new SageHRClient({ subdomain: "acme", apiKey: "k", fetch, maxRetries: 0 });
+
+    const balances = await client.policies.balancesFor(42);
+    expect(requestedPath).toBe("/api/employees/42/leave-management/balances");
+    expect(balances).toHaveLength(2);
+    expect(balances[0]!.available).toBe(2);
+    expect(balances[1]!.available).toBeNull();
+  });
+
   it("dedupes leave requests returned in multiple date windows", async () => {
     // A request straddling a window boundary is returned by SageHR in both
     // adjacent windows; listAll must yield it exactly once.
