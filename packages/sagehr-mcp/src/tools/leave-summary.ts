@@ -19,154 +19,41 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { computeLeaveDays } from "@hr-automotion/sagehr-client";
-import type { SageHRClient, LeaveRequest } from "@hr-automotion/sagehr-client";
+import type { SageHRClient, LeaveRequest, LeaveDaysOptions } from "@hr-automotion/sagehr-client";
 import { withErrorHandling } from "./_helpers.js";
+import {
+  aggregateByPolicy,
+  attachPolicyNames,
+  defaultYearStart,
+  describeDayCounting,
+  fetchPolicyNameMap,
+  todayISO,
+  withPolicyName,
+} from "../reporting/leave-aggregation.js";
 
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected ISO date YYYY-MM-DD");
 
 /**
- * Pick a canonical status bucket. SageHR ships both `status_code`
- * (machine-readable: "approved" / "declined" / "pending" / "cancelled")
- * and `status` (human-readable, capitalisation varies). Prefer the code
- * field, fall back to fuzzy-matching the human string.
+ * Shared working-day controls. Days are counted as business days (Mon–Fri,
+ * weekends excluded) by default — matching SageHR's working-day total for a
+ * standard week. These let the caller match other policy configurations.
  */
-function normaliseStatus(req: LeaveRequest): "approved" | "pending" | "rejected" | "cancelled" | "other" {
-  const code = (req.status_code ?? "").toLowerCase();
-  if (code === "approved") return "approved";
-  if (code === "pending" || code === "awaiting" || code === "awaiting_approval") return "pending";
-  if (code === "rejected" || code === "declined") return "rejected";
-  if (code === "cancelled" || code === "canceled") return "cancelled";
+const countWeekendsInput = z
+  .boolean()
+  .optional()
+  .default(false)
+  .describe(
+    "Count Saturdays and Sundays as leave days. Leave false for working-day totals; set true only for policies configured to count weekends as workdays.",
+  );
 
-  const human = (req.status ?? "").toLowerCase();
-  if (human.includes("approve")) return "approved";
-  if (human.includes("pend") || human.includes("await")) return "pending";
-  if (human.includes("reject") || human.includes("declin")) return "rejected";
-  if (human.includes("cancel")) return "cancelled";
-  return "other";
-}
-
-interface PolicyBucket {
-  policy_id: string | number | null;
-  request_count: number;
-  days_total: number;
-  hours_total: number;
-  by_status: Record<"approved" | "pending" | "rejected" | "cancelled" | "other", { request_count: number; days: number; hours: number }>;
-}
-
-function emptyStatusBuckets(): PolicyBucket["by_status"] {
-  return {
-    approved: { request_count: 0, days: 0, hours: 0 },
-    pending: { request_count: 0, days: 0, hours: 0 },
-    rejected: { request_count: 0, days: 0, hours: 0 },
-    cancelled: { request_count: 0, days: 0, hours: 0 },
-    other: { request_count: 0, days: 0, hours: 0 },
-  };
-}
-
-/** Aggregate a list of leave requests into a policy-level breakdown. */
-function aggregateByPolicy(requests: LeaveRequest[]): {
-  by_policy: PolicyBucket[];
-  totals: { request_count: number; days_total: number; hours_total: number };
-} {
-  const buckets = new Map<string, PolicyBucket>();
-  let totalDays = 0;
-  let totalHours = 0;
-
-  for (const req of requests) {
-    const key = String(req.policy_id ?? "unknown");
-    let bucket = buckets.get(key);
-    if (!bucket) {
-      bucket = {
-        policy_id: req.policy_id ?? null,
-        request_count: 0,
-        days_total: 0,
-        hours_total: 0,
-        by_status: emptyStatusBuckets(),
-      };
-      buckets.set(key, bucket);
-    }
-    // Days aren't pre-computed on SageHR's response — derive from dates and
-    // part-of-day flags. Hours are returned directly when present.
-    const days = computeLeaveDays(req);
-    const hours = Number(req.hours ?? 0) || 0;
-    bucket.request_count += 1;
-    bucket.days_total = round2(bucket.days_total + days);
-    bucket.hours_total = round2(bucket.hours_total + hours);
-    totalDays += days;
-    totalHours += hours;
-
-    const statusKey = normaliseStatus(req);
-    const statusBucket = bucket.by_status[statusKey];
-    statusBucket.request_count += 1;
-    statusBucket.days = round2(statusBucket.days + days);
-    statusBucket.hours = round2(statusBucket.hours + hours);
-  }
-
-  const by_policy = [...buckets.values()].sort((a, b) => b.days_total - a.days_total);
-  return {
-    by_policy,
-    totals: {
-      request_count: requests.length,
-      days_total: round2(totalDays),
-      hours_total: round2(totalHours),
-    },
-  };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-/**
- * SageHR's leave-request payload carries `policy_id` but not the policy name.
- * Fetch the policy list once and build a lookup so we can attach `policy`
- * (display name) to every aggregated bucket.
- */
-async function fetchPolicyNameMap(client: SageHRClient): Promise<Map<string, string>> {
-  try {
-    const policies = await client.policies.list();
-    const entries: Array<[string, string]> = [];
-    for (const p of policies) {
-      if (typeof p.name === "string") entries.push([String(p.id), p.name]);
-    }
-    return new Map(entries);
-  } catch {
-    return new Map();
-  }
-}
-
-function withPolicyName(
-  bucket: PolicyBucket,
-  policyNameById: Map<string, string>,
-): PolicyBucket & { policy: string | null } {
-  const id = bucket.policy_id == null ? null : String(bucket.policy_id);
-  return {
-    ...bucket,
-    policy: id ? (policyNameById.get(id) ?? null) : null,
-  };
-}
-
-async function attachPolicyNames(
-  client: SageHRClient,
-  buckets: PolicyBucket[],
-): Promise<Array<PolicyBucket & { policy: string | null }>> {
-  const map = await fetchPolicyNameMap(client);
-  return buckets.map((b) => withPolicyName(b, map));
-}
-
-function defaultYearStart(today: Date = new Date()): string {
-  return `${today.getUTCFullYear()}-01-01`;
-}
-
-function todayISO(today: Date = new Date()): string {
-  const y = today.getUTCFullYear();
-  const m = String(today.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(today.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
+const holidaysInput = z
+  .array(isoDate)
+  .optional()
+  .describe(
+    "Public-holiday dates (YYYY-MM-DD) to exclude from the count when they fall on a working day. SageHR's API does not expose its holiday calendar, so supply it here to match SageHR's figure exactly.",
+  );
 
 export function registerLeaveSummaryTools(server: McpServer, client: SageHRClient): void {
   // SageHR: GET /leave-management/requests (chunked) +
@@ -195,12 +82,15 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
           .optional()
           .default(true)
           .describe("Also fetch current leave balances for this employee."),
+        count_weekends: countWeekendsInput,
+        holidays: holidaysInput,
       },
     },
-    async ({ employee_id, from, to, include_balances }) =>
+    async ({ employee_id, from, to, include_balances, count_weekends, holidays }) =>
       withErrorHandling("sagehr_leave_summary_for_employee", async () => {
         const fromDate = from ?? defaultYearStart();
         const toDate = to ?? todayISO();
+        const dayOpts: LeaveDaysOptions = { countWeekends: count_weekends ?? false, holidays };
         const requests: LeaveRequest[] = [];
         for await (const r of client.leaveRequests.listAll({
           employee_id,
@@ -209,7 +99,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
         })) {
           requests.push(r);
         }
-        const { by_policy, totals } = aggregateByPolicy(requests);
+        const { by_policy, totals } = aggregateByPolicy(requests, dayOpts);
         const enriched = await attachPolicyNames(client, by_policy);
         const balances =
           include_balances !== false
@@ -219,6 +109,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
           employee_id,
           from: fromDate,
           to: toDate,
+          day_counting: describeDayCounting(dayOpts),
           totals,
           by_policy: enriched,
           balances,
@@ -261,12 +152,15 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
           .optional()
           .default(50)
           .describe("Cap the per-employee list to the top N by days_total."),
+        count_weekends: countWeekendsInput,
+        holidays: holidaysInput,
       },
     },
-    async ({ from, to, policy_id, status, top_n }) =>
+    async ({ from, to, policy_id, status, top_n, count_weekends, holidays }) =>
       withErrorHandling("sagehr_leave_summary_across_employees", async () => {
         const fromDate = from ?? defaultYearStart();
         const toDate = to ?? todayISO();
+        const dayOpts: LeaveDaysOptions = { countWeekends: count_weekends ?? false, holidays };
         const requests: LeaveRequest[] = [];
         for await (const r of client.leaveRequests.listAll({
           from: fromDate,
@@ -291,7 +185,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
 
         const perEmployee = [...byEmployee.entries()]
           .map(([employee_id, reqs]) => {
-            const agg = aggregateByPolicy(reqs);
+            const agg = aggregateByPolicy(reqs, dayOpts);
             return {
               employee_id,
               request_count: agg.totals.request_count,
@@ -304,7 +198,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
 
         const cap = top_n ?? 50;
         const capped = perEmployee.slice(0, cap);
-        const grand = aggregateByPolicy(requests);
+        const grand = aggregateByPolicy(requests, dayOpts);
 
         // Look up policy names once and attach to every bucket.
         const policyNameById = await fetchPolicyNameMap(client);
@@ -317,6 +211,7 @@ export function registerLeaveSummaryTools(server: McpServer, client: SageHRClien
         return {
           from: fromDate,
           to: toDate,
+          day_counting: describeDayCounting(dayOpts),
           filter: { policy_id: policy_id ?? null, status: status ?? null },
           totals: grand.totals,
           by_policy: grandEnriched,

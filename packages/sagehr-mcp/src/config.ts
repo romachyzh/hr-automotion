@@ -5,6 +5,12 @@ export interface Config {
   logLevel: "info" | "debug";
   httpPort: number;
   bearerToken: string | null;
+  /** Shared password gating the web dashboard. Null disables the dashboard. */
+  dashboardPassword: string | null;
+  /** Secret used to sign the dashboard session cookie. */
+  sessionSecret: string | null;
+  /** Override for where the built dashboard static assets live. */
+  dashboardDistDir: string | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -22,6 +28,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid PORT/HTTP_PORT: ${rawPort}`);
   }
 
+  const dashboardPassword = env.DASHBOARD_PASSWORD?.trim() || null;
+  const sessionSecret = env.SESSION_SECRET?.trim() || null;
+  // A password without a signing secret would mean unsigned session cookies —
+  // refuse rather than serve the dashboard insecurely.
+  if (dashboardPassword && !sessionSecret) {
+    throw new Error("DASHBOARD_PASSWORD is set but SESSION_SECRET is missing");
+  }
+
   return {
     subdomain,
     apiKey,
@@ -29,5 +43,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel,
     httpPort,
     bearerToken: env.MCP_BEARER_TOKEN?.trim() || null,
+    dashboardPassword,
+    sessionSecret,
+    dashboardDistDir: env.DASHBOARD_DIST_DIR?.trim() || null,
   };
 }

@@ -206,7 +206,9 @@ describe("SageHRClient", () => {
 });
 
 describe("computeLeaveDays", () => {
-  it("counts inclusive calendar days for a multi-day full leave", () => {
+  it("counts only business days for a multi-day full leave (excludes the weekend)", () => {
+    // Fri 2026-04-17 → Thu 2026-04-23 spans Sat 18 + Sun 19.
+    // Calendar span is 7 days; working days are Fri, Mon, Tue, Wed, Thu = 5.
     expect(
       computeLeaveDays({
         id: 1,
@@ -215,9 +217,46 @@ describe("computeLeaveDays", () => {
         end_date: "2026-04-23",
         is_part_of_day: false,
       }),
+    ).toBe(5);
+  });
+  it("counts weekends when countWeekends is set (calendar-based policies)", () => {
+    expect(
+      computeLeaveDays(
+        {
+          id: 1,
+          employee_id: 1,
+          start_date: "2026-04-17",
+          end_date: "2026-04-23",
+          is_part_of_day: false,
+        },
+        { countWeekends: true },
+      ),
     ).toBe(7);
   });
-  it("returns 1 for a single full day with start_date only", () => {
+  it("subtracts supplied public holidays falling on a working day", () => {
+    // Fri 2026-05-01 (holiday) → Tue 2026-05-05: working days Fri,Mon,Tue = 3,
+    // minus the May 1 holiday = 2.
+    expect(
+      computeLeaveDays(
+        {
+          id: 1,
+          employee_id: 1,
+          start_date: "2026-05-01",
+          end_date: "2026-05-05",
+          is_part_of_day: false,
+        },
+        { holidays: ["2026-05-01"] },
+      ),
+    ).toBe(2);
+  });
+  it("returns 0 for a full-day request that falls on a weekend", () => {
+    // Sat 2026-05-02.
+    expect(
+      computeLeaveDays({ id: 1, employee_id: 1, start_date: "2026-05-02" }),
+    ).toBe(0);
+  });
+  it("returns 1 for a single full day on a weekday with start_date only", () => {
+    // Wed 2026-05-06.
     expect(
       computeLeaveDays({ id: 1, employee_id: 1, start_date: "2026-05-06" }),
     ).toBe(1);

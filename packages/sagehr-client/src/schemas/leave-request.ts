@@ -56,23 +56,46 @@ export const LeaveRequestSchema = z
 
 export type LeaveRequest = z.infer<typeof LeaveRequestSchema>;
 
+export interface LeaveDaysOptions {
+  /**
+   * Count Saturday and Sunday as leave days. Default `false` — i.e. only
+   * Mon–Fri are counted, matching the working-day total SageHR shows for a
+   * standard 5-day week. Set `true` only for policies configured to "count
+   * weekends as workdays".
+   */
+  countWeekends?: boolean;
+  /**
+   * Public-holiday dates (ISO `YYYY-MM-DD`) that should NOT be counted when
+   * they fall on an otherwise-working day. SageHR's own count subtracts these
+   * unless the policy is set to "count public holidays as workdays". This
+   * endpoint doesn't return them, so the caller must supply the calendar.
+   */
+  holidays?: Iterable<string>;
+}
+
 /**
- * Derive a calendar-day count from a leave request.
+ * Derive the number of leave days an employee actually took from a leave
+ * request.
  *
- * - Multi-day full leave: end_date − start_date + 1 (inclusive)
- * - Single-day full: 1
+ * - Multi-day full leave: count of working days in [start_date, end_date],
+ *   excluding weekends (and any supplied `holidays`).
+ * - Single-day full: 1 if it's a working day, else 0.
  * - Half-day (is_part_of_day):
  *     • both first+second halves → 1
  *     • one half → 0.5
  *     • neither flag set but is_part_of_day true → 0.5 (safe default)
  *
- * NOTE: This is *calendar* days, not business days. SageHR's own UI usually
- * displays business days, computed against each employee's workweek and
- * holiday calendar — info that's not in this endpoint's response. For most
- * reporting needs the calendar count is close enough; if you need exact
- * business-day accounting, walk to the policy's `unit` and a holiday list.
+ * IMPORTANT: this counts *business* days for a standard Mon–Fri week. The
+ * fully-authoritative number is computed server-side by SageHR from the
+ * policy type (calendar- vs working-pattern-based), the employee's individual
+ * working pattern, and the tenant's holiday calendar — none of which are on
+ * the `/leave-management/requests` payload. This approximation matches SageHR
+ * for the common case (5-day week, weekends not counted); pass `holidays` to
+ * also subtract public holidays, or `countWeekends: true` for policies that
+ * count weekends. For an exact per-policy "used" total, prefer the
+ * employee leave-balances endpoint, which returns SageHR's own figure.
  */
-export function computeLeaveDays(req: LeaveRequest): number {
+export function computeLeaveDays(req: LeaveRequest, opts: LeaveDaysOptions = {}): number {
   if (req.is_part_of_day) {
     const halves =
       (req.first_part_of_day ? 0.5 : 0) + (req.second_part_of_day ? 0.5 : 0);
@@ -86,5 +109,26 @@ export function computeLeaveDays(req: LeaveRequest): number {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
     return 0;
   }
-  return Math.round((endMs - startMs) / 86_400_000) + 1;
+
+  const countWeekends = opts.countWeekends ?? false;
+  const holidays = opts.holidays ? new Set(opts.holidays) : null;
+
+  let days = 0;
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    if (!countWeekends) {
+      const dow = new Date(ms).getUTCDay(); // 0 = Sunday, 6 = Saturday
+      if (dow === 0 || dow === 6) continue;
+    }
+    if (holidays && holidays.has(isoDateUTC(ms))) continue;
+    days += 1;
+  }
+  return days;
+}
+
+function isoDateUTC(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }

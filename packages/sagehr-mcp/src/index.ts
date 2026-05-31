@@ -12,10 +12,17 @@ async function main(): Promise<void> {
     if (!config.bearerToken) {
       throw new Error("--http requires MCP_BEARER_TOKEN to be set");
     }
+    // One shared client backs the dashboard data API; the per-request MCP
+    // servers stay stateless and build their own.
+    const { client } = buildServer(config);
     await runHttp({
       port: config.httpPort,
       bearerToken: config.bearerToken,
       buildServer: () => buildServer(config).server,
+      client,
+      dashboardPassword: config.dashboardPassword,
+      sessionSecret: config.sessionSecret,
+      dashboardDistDir: config.dashboardDistDir,
     });
     return;
   }
