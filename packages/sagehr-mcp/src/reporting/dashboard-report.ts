@@ -116,7 +116,10 @@ export async function buildDashboardReport(
   params: DashboardParams = {},
 ): Promise<DashboardReport> {
   const from = params.from ?? defaultYearStart();
-  const to = params.to ?? todayISO();
+  // Default to the full allowance year, not YTD: SageHR's "used"/"available"
+  // figures count the whole allowance period (including approved future
+  // bookings), so to match them we must include the rest of the year.
+  const to = params.to ?? defaultYearEnd();
   const dayOpts = params.dayOpts ?? {};
   const teamFilter = params.teamId != null ? String(params.teamId) : null;
 
@@ -226,7 +229,11 @@ export async function buildDashboardReport(
           source = "balances";
         }
       }
-      if (source === "unknown" && allowance !== null) {
+      // Only compute a remaining for policies with a real positive allowance.
+      // Sick / unpaid / temporary leave carry allowance 0 in SageHR (no fixed
+      // bucket — they show "days used" only), so "allowance − used" would be a
+      // meaningless negative; leave remaining null → the UI shows "—".
+      if (source === "unknown" && allowance !== null && allowance > 0) {
         remaining = round2(allowance - used);
         source = "computed";
       }
@@ -411,6 +418,10 @@ function employeeName(emp: Employee): string {
   if (parts.length > 0) return parts.join(" ");
   if (typeof emp.email === "string" && emp.email) return emp.email;
   return String(emp.id);
+}
+
+function defaultYearEnd(today: Date = new Date()): string {
+  return `${today.getUTCFullYear()}-12-31`;
 }
 
 function toNumberOrNull(value: unknown): number | null {

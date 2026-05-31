@@ -48,7 +48,7 @@ export class LeaveRequestsResource {
   /**
    * Walk every leave request matching the filters.
    *
-   * Two pieces of vendor-side weirdness are handled here:
+   * Three pieces of vendor-side weirdness are handled here:
    *
    *   1. Date-range cap. SageHR rejects `from`..`to` ranges of ≥65 days
    *      with HTTP 422. We split into ≤60-day windows transparently.
@@ -58,11 +58,18 @@ export class LeaveRequestsResource {
    *      regardless of the `employee_id` query param. We send it anyway
    *      (in case a future version honours it) AND filter client-side as
    *      a guarantee.
+   *
+   *   3. Window-boundary double counting. The endpoint returns any request
+   *      that OVERLAPS [from, to], so a multi-day request straddling a
+   *      window boundary comes back in both adjacent windows. We dedupe by
+   *      request id so each request is yielded exactly once — otherwise
+   *      aggregations (used-days totals) over-count boundary-crossing leave.
    */
   async *listAll(params: Omit<ListLeaveRequestsParams, "page"> = {}): AsyncIterable<LeaveRequest> {
     const { from, to, employee_id, ...rest } = params;
     const employeeIdStr = employee_id !== undefined ? String(employee_id) : null;
     const windows = chunkDateRange(from, to, 60);
+    const seen = new Set<string>();
     for (const window of windows) {
       for await (const req of paginate(
         (p) => this.list({ ...rest, employee_id, ...window, ...p }),
@@ -71,6 +78,9 @@ export class LeaveRequestsResource {
         if (employeeIdStr !== null && String(req.employee_id) !== employeeIdStr) {
           continue;
         }
+        const id = String(req.id);
+        if (seen.has(id)) continue;
+        seen.add(id);
         yield req;
       }
     }

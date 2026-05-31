@@ -203,6 +203,25 @@ describe("SageHRClient", () => {
       expect(span).toBeLessThan(65);
     }
   });
+
+  it("dedupes leave requests returned in multiple date windows", async () => {
+    // A request straddling a window boundary is returned by SageHR in both
+    // adjacent windows; listAll must yield it exactly once.
+    const reqResponse = () =>
+      jsonResponse({
+        data: [{ id: 500, employee_id: 1, policy_id: 7, start_date: "2026-02-25", end_date: "2026-03-05" }],
+        meta: { total: 1, current_page: 1, total_pages: 1 },
+      });
+    // ~90-day range → 2 windows → 2 fetch calls, same request id in each.
+    const fetch = mockFetch([reqResponse(), reqResponse()]);
+    const client = new SageHRClient({ subdomain: "acme", apiKey: "k", fetch, maxRetries: 0 });
+
+    const out: Array<number | string> = [];
+    for await (const r of client.leaveRequests.listAll({ from: "2026-01-01", to: "2026-04-01" })) {
+      out.push(r.id);
+    }
+    expect(out).toEqual([500]);
+  });
 });
 
 describe("computeLeaveDays", () => {

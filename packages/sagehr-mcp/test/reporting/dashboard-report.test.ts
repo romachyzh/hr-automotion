@@ -117,6 +117,31 @@ describe("buildDashboardReport", () => {
     expect(cell.remaining_source).toBe("unknown");
   });
 
+  it("shows no remaining for zero-allowance policies (sick/unpaid/temporary)", async () => {
+    const client = fakeClient({
+      policies: [
+        { id: 7, name: "Vacation", unit: "days", default_allowance: 20 },
+        { id: 8, name: "Sickday", unit: "days", default_allowance: 0 },
+      ],
+      teams: [],
+      employees: [{ id: 1, full_name: "A. Marin" }],
+      requests: [
+        APPROVED_5_DAYS, // vacation, policy 7
+        { id: 200, employee_id: 1, policy_id: 8, status_code: "approved", start_date: "2026-05-06" },
+      ],
+      balances: { "1": "throw" },
+    });
+
+    const report = await buildDashboardReport(client);
+    const row = report.employees[0]!;
+    const sick = row.by_policy.find((c) => String(c.policy_id) === "8")!;
+    expect(sick.used).toBe(1);
+    expect(sick.remaining).toBeNull();
+    expect(sick.remaining_source).toBe("unknown");
+    // Total remaining counts only the vacation cell (allowance 20 − 5 = 15).
+    expect(row.totals.remaining).toBe(15);
+  });
+
   it("filters to a single team when teamId is given", async () => {
     const client = fakeClient({
       policies: [POLICY_VACATION],
