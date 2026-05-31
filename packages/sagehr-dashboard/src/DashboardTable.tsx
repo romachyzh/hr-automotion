@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
-import type { DashboardEmployeeRow, DashboardPolicy, DashboardReport } from "./types";
+import type { DashboardEmployeeRow, DashboardPolicy } from "./types";
 
-function policyKey(id: string | number | null): string {
+export type SortDir = "asc" | "desc";
+export interface SortState {
+  key: string;
+  dir: SortDir;
+}
+
+export function policyKey(id: string | number | null): string {
   return id != null ? String(id) : "unknown";
 }
 
@@ -10,120 +16,169 @@ function fmt(n: number | null): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
 function cellFor(row: DashboardEmployeeRow, policy: DashboardPolicy) {
   const key = policyKey(policy.policy_id);
   return row.by_policy.find((c) => policyKey(c.policy_id) === key);
 }
 
-function EmployeeRow({ row, policies }: { row: DashboardEmployeeRow; policies: DashboardPolicy[] }) {
+/** A used / bar / remaining cell. */
+function UsageCell({
+  used,
+  remaining,
+  allowance,
+}: {
+  used: number;
+  remaining: number | null;
+  allowance: number | null;
+}) {
+  const hasBar = allowance !== null && allowance > 0;
+  const pct = hasBar ? Math.min(100, Math.max(0, (used / allowance) * 100)) : 0;
+  const over = remaining !== null && remaining < 0;
+  return (
+    <div className="cell">
+      <div className="nums">
+        <span className="used">{fmt(used)}</span>
+        <span className={`rem${remaining === null ? " muted" : over ? " neg" : ""}`}>
+          {fmt(remaining)}
+        </span>
+      </div>
+      {hasBar && (
+        <div className={`bar${over ? " over" : ""}`}>
+          <span style={{ width: `${over ? 100 : pct}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: string;
+  sort: SortState;
+  onSort: (key: string) => void;
+  className?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      className={`sortable${className ? ` ${className}` : ""}${active ? " active" : ""}`}
+      onClick={() => onSort(sortKey)}
+      title="Click to sort"
+    >
+      {label}
+      <span className="arrow">{active ? (sort.dir === "asc" ? "▲" : "▼") : "▾"}</span>
+    </th>
+  );
+}
+
+function EmployeeRow({
+  row,
+  policies,
+}: {
+  row: DashboardEmployeeRow;
+  policies: DashboardPolicy[];
+}) {
+  const totalOver = row.totals.remaining !== null && row.totals.remaining < 0;
   return (
     <tr>
-      <td>{row.name}</td>
+      <td className="name">
+        <span className="avatar">{initials(row.name)}</span>
+        {row.name}
+      </td>
       {policies.map((p) => {
         const cell = cellFor(row, p);
-        const used = cell ? cell.used : 0;
-        const remaining = cell ? cell.remaining : null;
-        const computed = cell?.remaining_source === "computed";
         return (
-          <ConsecutiveCells
-            key={policyKey(p.policy_id)}
-            used={used}
-            remaining={remaining}
-            computed={computed}
-          />
+          <td key={policyKey(p.policy_id)} className="num">
+            <UsageCell
+              used={cell?.used ?? 0}
+              remaining={cell ? cell.remaining : null}
+              allowance={cell?.allowance ?? p.default_allowance}
+            />
+          </td>
         );
       })}
-      <td className="num used">{fmt(row.totals.used)}</td>
-      <td className="num remaining">{fmt(row.totals.remaining)}</td>
+      <td className="num">
+        <div className="cell">
+          <div className="nums">
+            <span className="used">{fmt(row.totals.used)}</span>
+            <span className={`total-rem${totalOver ? " neg" : ""}`}>{fmt(row.totals.remaining)}</span>
+          </div>
+        </div>
+      </td>
     </tr>
   );
 }
 
-function ConsecutiveCells({
-  used,
-  remaining,
-  computed,
-}: {
-  used: number;
-  remaining: number | null;
-  computed: boolean;
-}) {
-  return (
-    <>
-      <td className="num used">{fmt(used)}</td>
-      <td
-        className={`num remaining${remaining === null ? " null" : ""}${computed ? " source-computed" : ""}`}
-        title={computed ? "Remaining computed from allowance − used (no balance from SageHR)" : undefined}
-      >
-        {fmt(remaining)}
-        {computed ? "*" : ""}
-      </td>
-    </>
-  );
-}
-
 export function DashboardTable({
-  report,
+  policies,
+  rows,
   groupByTeam,
+  sort,
+  onSort,
 }: {
-  report: DashboardReport;
+  policies: DashboardPolicy[];
+  rows: DashboardEmployeeRow[];
   groupByTeam: boolean;
+  sort: SortState;
+  onSort: (key: string) => void;
 }) {
-  const { policies, employees } = report;
-  const colCount = 1 + policies.length * 2 + 2;
-
-  const groups = groupByTeam ? groupByTeamName(employees) : null;
+  const colCount = 1 + policies.length + 1;
+  const groups = groupByTeam ? groupRows(rows) : null;
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <th rowSpan={2}>Employee</th>
-          {policies.map((p) => (
-            <th key={policyKey(p.policy_id)} colSpan={2} className="num">
-              {p.policy ?? `Policy ${policyKey(p.policy_id)}`}
-            </th>
-          ))}
-          <th colSpan={2} className="num">
-            Total
-          </th>
-        </tr>
-        <tr>
-          {policies.map((p) => (
-            <SubHeaders key={policyKey(p.policy_id)} />
-          ))}
-          <th className="num">Used</th>
-          <th className="num">Rem</th>
-        </tr>
-      </thead>
-      <tbody>
-        {groups
-          ? groups.map((g) => (
-              <Group key={g.key} title={g.name} count={g.rows.length} colSpan={colCount}>
-                {g.rows.map((row) => (
+    <div className="table-card">
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <SortHeader label="Employee" sortKey="name" sort={sort} onSort={onSort} />
+              {policies.map((p) => (
+                <SortHeader
+                  key={policyKey(p.policy_id)}
+                  label={p.policy ?? `Policy ${policyKey(p.policy_id)}`}
+                  sortKey={`pol:${policyKey(p.policy_id)}`}
+                  sort={sort}
+                  onSort={onSort}
+                  className="num"
+                />
+              ))}
+              <SortHeader label="Total" sortKey="total" sort={sort} onSort={onSort} className="num" />
+            </tr>
+          </thead>
+          <tbody>
+            {groups
+              ? groups.map((g) => (
+                  <Group key={g.key} title={g.name} count={g.rows.length} colSpan={colCount}>
+                    {g.rows.map((row) => (
+                      <EmployeeRow key={String(row.employee_id)} row={row} policies={policies} />
+                    ))}
+                  </Group>
+                ))
+              : rows.map((row) => (
                   <EmployeeRow key={String(row.employee_id)} row={row} policies={policies} />
                 ))}
-              </Group>
-            ))
-          : employees.map((row) => (
-              <EmployeeRow key={String(row.employee_id)} row={row} policies={policies} />
-            ))}
-        {employees.length === 0 && (
-          <tr>
-            <td colSpan={colCount}>No employees in range.</td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-  );
-}
-
-function SubHeaders() {
-  return (
-    <>
-      <th className="num">Used</th>
-      <th className="num">Rem</th>
-    </>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={colCount} className="empty">
+                  No employees match.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -142,7 +197,7 @@ function Group({
     <>
       <tr className="team-header">
         <td colSpan={colSpan}>
-          {title} · {count} {count === 1 ? "person" : "people"}
+          {title} <span className="meta">· {count} {count === 1 ? "person" : "people"}</span>
         </td>
       </tr>
       {children}
@@ -156,7 +211,7 @@ interface TeamGroup {
   rows: DashboardEmployeeRow[];
 }
 
-function groupByTeamName(rows: DashboardEmployeeRow[]): TeamGroup[] {
+function groupRows(rows: DashboardEmployeeRow[]): TeamGroup[] {
   const map = new Map<string, TeamGroup>();
   for (const row of rows) {
     const key = row.team_id != null ? String(row.team_id) : "none";
