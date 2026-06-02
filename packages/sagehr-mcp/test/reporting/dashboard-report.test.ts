@@ -85,6 +85,43 @@ describe("buildDashboardReport", () => {
     expect(cell.remaining_source).toBe("balances");
   });
 
+  it("prefers SageHR's authoritative `used` over the computed business-day count", async () => {
+    // Request spans 5 business days, but SageHR reports 4 used (e.g. a public
+    // holiday inside the range, or a future-dated portion it excludes). The
+    // dashboard must surface SageHR's figure, not our computed approximation.
+    const client = fakeClient({
+      policies: [POLICY_VACATION],
+      teams: [{ id: 10, name: "Engineering" }],
+      employees: [{ id: 1, full_name: "A. Marin", team_id: 10, team: "Engineering" }],
+      requests: [APPROVED_5_DAYS],
+      balances: {
+        "1": [{ policy_id: 7, used: 4, available: 16 }],
+      },
+    });
+
+    const report = await buildDashboardReport(client, { from: "2026-01-01", to: "2026-05-31" });
+    const cell = report.employees[0]!.by_policy.find((c) => String(c.policy_id) === "7")!;
+    expect(cell.used).toBe(4); // SageHR's figure, not the computed 5
+    expect(cell.used_source).toBe("balances");
+    expect(cell.remaining).toBe(16);
+    expect(report.employees[0]!.totals.used).toBe(4);
+  });
+
+  it("falls back to the computed business-day count when balances 404", async () => {
+    const client = fakeClient({
+      policies: [POLICY_VACATION],
+      teams: [{ id: 10, name: "Engineering" }],
+      employees: [{ id: 1, full_name: "A. Marin", team_id: 10, team: "Engineering" }],
+      requests: [APPROVED_5_DAYS],
+      balances: { "1": "throw" },
+    });
+
+    const report = await buildDashboardReport(client, { from: "2026-01-01", to: "2026-05-31" });
+    const cell = report.employees[0]!.by_policy.find((c) => String(c.policy_id) === "7")!;
+    expect(cell.used).toBe(5); // computed business days
+    expect(cell.used_source).toBe("computed");
+  });
+
   it("falls back to allowance − used when balances 404", async () => {
     const client = fakeClient({
       policies: [POLICY_VACATION],

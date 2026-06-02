@@ -67,6 +67,13 @@ export interface EmployeePolicyCell {
   remaining: number | null;
   allowance: number | null;
   remaining_source: RemainingSource;
+  /**
+   * Where `used` came from. `balances` = SageHR's own authoritative figure
+   * (excludes public holidays / honours the employee's working pattern);
+   * `computed` = our `computeLeaveDays` approximation (business-day fallback
+   * used only when the balances endpoint is unavailable on this tenant).
+   */
+  used_source: RemainingSource;
 }
 
 export interface DashboardEmployeeRow {
@@ -212,13 +219,29 @@ export async function buildDashboardReport(
     for (const pid of seenPolicyIds) {
       const meta = policyMeta.get(pid);
       const usedEntry = usedByPolicy.get(pid);
-      const used = usedEntry?.used ?? 0;
+      const computedUsed = usedEntry?.used ?? 0;
       // Only emit a cell when the employee has usage or a known tenant policy;
       // skip synthetic "unknown" columns the employee never touched.
       if (!meta && !usedEntry) continue;
       const policyId = meta?.policy_id ?? usedEntry?.policy_id ?? (pid === "unknown" ? null : pid);
       const policyName = meta?.name ?? policyNameById.get(pid) ?? null;
       const allowance = meta?.allowance ?? null;
+
+      // "Used" — prefer SageHR's own figure from the balances endpoint. Our
+      // computed value (computeLeaveDays over approved requests) over-counts:
+      // it treats public holidays as leave, includes the whole date range of
+      // requests that straddle the year boundary, and ignores per-employee
+      // working patterns. SageHR's `used` accounts for all of that. Fall back
+      // to computed only when balances are unavailable on this tenant.
+      let used = round2(computedUsed);
+      let usedSource: RemainingSource = "computed";
+      if (balancesAvailable) {
+        const usedFromBalances = pickUsedFromBalances(balances, policyId, policyName);
+        if (usedFromBalances !== null) {
+          used = round2(usedFromBalances);
+          usedSource = "balances";
+        }
+      }
 
       let remaining: number | null = null;
       let source: RemainingSource = "unknown";
@@ -241,10 +264,11 @@ export async function buildDashboardReport(
       cells.push({
         policy_id: policyId,
         policy: policyName,
-        used: round2(used),
+        used,
         remaining,
         allowance,
         remaining_source: source,
+        used_source: usedSource,
       });
     }
     cells.sort((a, b) => (a.policy ?? "").localeCompare(b.policy ?? ""));
@@ -377,6 +401,30 @@ function pickRemainingFromBalances(
     if (idMatch || nameMatch) {
       const raw = b.available ?? b.balance;
       const n = toNumberOrNull(raw);
+      if (n !== null) return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Find SageHR's authoritative `used` figure for one policy from an employee's
+ * balance rows. Same id-then-name matching as the remaining lookup.
+ */
+function pickUsedFromBalances(
+  balances: LeaveBalance[],
+  policyId: string | number | null,
+  policyName: string | null,
+): number | null {
+  for (const b of balances) {
+    const idMatch =
+      policyId != null && b.policy_id != null && String(b.policy_id) === String(policyId);
+    const nameMatch =
+      policyName != null &&
+      typeof b.policy === "string" &&
+      b.policy.toLowerCase() === policyName.toLowerCase();
+    if (idMatch || nameMatch) {
+      const n = toNumberOrNull(b.used);
       if (n !== null) return n;
     }
   }

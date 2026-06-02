@@ -22,6 +22,8 @@ export interface EmployeePolicyCell {
   remaining: number | null;
   allowance: number | null;
   remaining_source: RemainingSource;
+  /** `balances` = SageHR's own figure; `computed` = business-day fallback. */
+  used_source: RemainingSource;
 }
 
 export interface DashboardEmployeeRow {
